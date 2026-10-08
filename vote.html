@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Colour Jeopardy – Vote</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #1e1e2f, #2d2d44);
+    color: #fff; min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 30px 16px 60px;
+  }
+  h1 { font-size: 3.4rem; text-align: center; line-height: 1.1; margin-bottom: 8px; }
+  .sub { opacity: .8; margin-bottom: 26px; text-align: center; font-size: 1.15rem; }
+  .names {
+    display: grid; grid-template-columns: repeat(3, 1fr);
+    gap: 16px; width: 100%; max-width: 760px;
+  }
+  @media (max-width: 560px) { .names { grid-template-columns: repeat(2, 1fr); } h1 { font-size: 2.4rem; } }
+  .names button {
+    padding: 22px 10px; font-size: 1.3rem; font-weight: 700; color: #fff;
+    border: none; border-radius: 16px; cursor: pointer;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    transition: transform .15s, opacity .3s;
+  }
+  .names button:hover:not(:disabled) { transform: translateY(-4px); }
+  .names button:disabled { cursor: default; opacity: .35; }
+  .names button.chosen { opacity: 1; outline: 5px solid #fff; }
+  .msg {
+    margin: 24px 0; padding: 16px 26px; border-radius: 14px;
+    background: rgba(255,255,255,.1); font-size: 1.25rem; text-align: center;
+  }
+  .hidden { display: none !important; }
+
+  #host {
+    margin-top: 34px; padding: 20px; border-radius: 16px; width: 100%; max-width: 760px;
+    background: rgba(255,255,255,.07); text-align: center;
+  }
+  #host h2 { margin-bottom: 10px; }
+  #voteCount { font-size: 1.4rem; margin-bottom: 16px; }
+  .hostBtn {
+    padding: 14px 26px; margin: 6px; font-size: 1.1rem; font-weight: 700;
+    border: none; border-radius: 30px; cursor: pointer;
+  }
+  #endBtn { background: #e53935; color: #fff; }
+  #newBtn { background: #fff; color: #222; }
+
+  #results { width: 100%; max-width: 760px; text-align: center; }
+  #results h2 { font-size: 2.6rem; margin: 10px 0 30px; }
+  .podium { display: flex; justify-content: center; align-items: flex-end; gap: 14px; }
+  .place {
+    flex: 1; max-width: 220px; border-radius: 16px 16px 0 0;
+    display: flex; flex-direction: column; justify-content: flex-start; align-items: center;
+    padding: 18px 8px; animation: rise .9s ease-out both;
+  }
+  .place .medal { font-size: 3rem; }
+  .place .who { font-size: 1.5rem; font-weight: 800; margin: 8px 0; word-break: break-word; }
+  .place .pts { font-size: 1.1rem; opacity: .9; }
+  .p1 { height: 300px; background: linear-gradient(#fdd835, #f9a825); color: #222; animation-delay: 1.6s; }
+  .p2 { height: 240px; background: linear-gradient(#cfd8dc, #90a4ae); color: #222; animation-delay: .8s; }
+  .p3 { height: 190px; background: linear-gradient(#ffab91, #d84315); animation-delay: 0s; }
+  @keyframes rise { from { transform: translateY(80px); opacity: 0; } to { transform: none; opacity: 1; } }
+</style>
+</head>
+<body>
+  <h1>🗳️ Colour Jeopardy<br>Vote</h1>
+  <p class="sub" id="sub">Who found the best object? Tap one name – you only get one vote, and it's anonymous.</p>
+
+  <div class="msg hidden" id="msg"></div>
+  <div class="names" id="names"></div>
+
+  <div id="results" class="hidden">
+    <h2>🏆 Top 3 🏆</h2>
+    <div class="podium" id="podium"></div>
+  </div>
+
+  <div id="host" class="hidden">
+    <h2>Host controls</h2>
+    <div id="voteCount">0 votes so far</div>
+    <button class="hostBtn" id="endBtn">End voting & show top 3</button>
+    <button class="hostBtn" id="newBtn">Start a new vote</button>
+  </div>
+
+<script>
+  const TOPIC = "cj-vote-cd47238a5e586936";
+  const BASE = `https://ntfy.sh/${TOPIC}`;
+  const names = ["TJ","Emmanuel","Nerea","Alessandra","Marcio","Marta",
+                 "Sebastién","Federico","Timo","Matteo","Lisa","Judith"];
+  const colors = ["#1e88e5","#43a047","#fdd835","#e53935","#ec407a","#8e24aa"];
+  const isHost = new URLSearchParams(location.search).has("host");
+
+  const seen = new Set();
+  const events = [];   // {time, id, data}
+  let state = { round: "initial", votes: {}, closed: false, total: 0 };
+
+  const namesEl = document.getElementById("names");
+  const msgEl = document.getElementById("msg");
+  const buttons = names.map((n, i) => {
+    const b = document.createElement("button");
+    b.textContent = n;
+    b.style.background = colors[i % colors.length];
+    if (colors[i % colors.length] === "#fdd835") b.style.color = "#222";
+    b.onclick = () => vote(n);
+    namesEl.appendChild(b);
+    return b;
+  });
+
+  function myVoteKey() { return `cj-voted-${TOPIC}-${state.round}`; }
+
+  function recompute() {
+    events.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
+    let round = "initial", votes = {}, closed = false, total = 0;
+    for (const e of events) {
+      const d = e.data;
+      if (d.type === "reset") { round = d.round; votes = {}; closed = false; total = 0; }
+      else if (d.type === "vote" && d.round === round && !closed && names.includes(d.name)) {
+        votes[d.name] = (votes[d.name] || 0) + 1; total++;
+      }
+      else if (d.type === "close" && d.round === round) closed = true;
+    }
+    state = { round, votes, closed, total };
+    render();
+  }
+
+  function render() {
+    const mine = localStorage.getItem(myVoteKey());
+    document.getElementById("voteCount").textContent =
+      `${state.total} vote${state.total === 1 ? "" : "s"} so far`;
+    document.getElementById("endBtn").disabled = state.closed;
+
+    if (state.closed) {
+      namesEl.classList.add("hidden");
+      document.getElementById("sub").classList.add("hidden");
+      showMsg("");
+      showResults();
+      return;
+    }
+    namesEl.classList.remove("hidden");
+    document.getElementById("sub").classList.remove("hidden");
+    document.getElementById("results").classList.add("hidden");
+    buttons.forEach(b => {
+      b.disabled = !!mine;
+      b.classList.toggle("chosen", b.textContent === mine);
+    });
+    showMsg(mine ? `✅ Thanks! Your vote has been counted. Results will be revealed by the host.` : "");
+  }
+
+  function showMsg(t) { msgEl.textContent = t; msgEl.classList.toggle("hidden", !t); }
+
+  function showResults() {
+    const res = document.getElementById("results");
+    if (!res.classList.contains("hidden")) return;
+    // Group by points so ties share a podium spot
+    const groups = {};
+    Object.entries(state.votes).forEach(([n, p]) => (groups[p] = groups[p] || []).push(n));
+    const ranked = Object.keys(groups).map(Number).sort((a, b) => b - a).slice(0, 3)
+      .map(p => ({ pts: p, who: groups[p].join(" & ") }));
+    const podium = document.getElementById("podium");
+    podium.innerHTML = "";
+    if (!ranked.length) {
+      podium.innerHTML = `<div class="msg">No votes were cast 🤷</div>`;
+    } else {
+      const medals = ["🥇","🥈","🥉"];
+      [1, 0, 2].forEach(i => {
+        if (!ranked[i]) return;
+        const d = document.createElement("div");
+        d.className = `place p${i + 1}`;
+        d.innerHTML = `<div class="medal">${medals[i]}</div>
+          <div class="who"></div>
+          <div class="pts">${ranked[i].pts} point${ranked[i].pts === 1 ? "" : "s"}</div>`;
+        d.querySelector(".who").textContent = ranked[i].who;
+        podium.appendChild(d);
+      });
+    }
+    res.classList.remove("hidden");
+  }
+
+  async function publish(data) {
+    const r = await fetch(BASE, { method: "POST", body: JSON.stringify(data) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    ingest(j);
+  }
+
+  async function vote(name) {
+    if (localStorage.getItem(myVoteKey()) || state.closed) return;
+    buttons.forEach(b => b.disabled = true);
+    try {
+      await publish({ type: "vote", name, round: state.round });
+      localStorage.setItem(myVoteKey(), name);
+      render();
+    } catch (e) {
+      showMsg("⚠️ Couldn't send your vote – please try again.");
+      buttons.forEach(b => b.disabled = false);
+    }
+  }
+
+  function ingest(ev) {
+    if (!ev || ev.event !== "message" || seen.has(ev.id)) return;
+    seen.add(ev.id);
+    try { events.push({ time: ev.time, id: ev.id, data: JSON.parse(ev.message) }); }
+    catch { return; }
+    recompute();
+  }
+
+  function connect() {
+    const es = new EventSource(`${BASE}/sse?since=all`);
+    es.onmessage = e => { try { ingest(JSON.parse(e.data)); } catch {} };
+  }
+
+  if (isHost) {
+    document.getElementById("host").classList.remove("hidden");
+    document.getElementById("endBtn").onclick = async () => {
+      if (!confirm("End voting and reveal the top 3?")) return;
+      await publish({ type: "close", round: state.round });
+    };
+    document.getElementById("newBtn").onclick = async () => {
+      if (!confirm("Start a brand-new vote? All current votes will be cleared.")) return;
+      await publish({ type: "reset", round: String(Date.now()) });
+    };
+  }
+
+  render();
+  connect();
+</script>
+</body>
+</html>
