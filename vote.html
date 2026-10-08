@@ -89,7 +89,6 @@
   const BASE = `https://ntfy.sh/${TOPIC}`;
   const names = ["TJ","Emmanuel","Nerea","Alessandra","Marcio","Marta",
                  "Sebastién","Federico","Timo","Matteo","Lisa","Judith"];
-  const colors = ["#1e88e5","#43a047","#fdd835","#e53935","#ec407a","#8e24aa"];
   const isHost = new URLSearchParams(location.search).has("host");
 
   const seen = new Set();
@@ -101,8 +100,7 @@
   const buttons = names.map((n, i) => {
     const b = document.createElement("button");
     b.textContent = n;
-    b.style.background = colors[i % colors.length];
-    if (colors[i % colors.length] === "#fdd835") b.style.color = "#222";
+    b.style.background = "#5c6bc0";
     b.onclick = () => vote(n);
     namesEl.appendChild(b);
     return b;
