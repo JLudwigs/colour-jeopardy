@@ -63,6 +63,20 @@
   .p2 { height: 240px; background: linear-gradient(#cfd8dc, #90a4ae); color: #222; animation-delay: .8s; }
   .p3 { height: 190px; background: linear-gradient(#ffab91, #d84315); animation-delay: 0s; }
   @keyframes rise { from { transform: translateY(80px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  #overall {
+    margin-top: 40px; width: 100%; max-width: 520px; text-align: center;
+    padding: 18px 16px 0; border-radius: 16px; background: rgba(255,255,255,.07);
+  }
+  #overall h3 { font-size: 1.4rem; margin-bottom: 4px; }
+  #overall .note { opacity: .7; font-size: .9rem; margin-bottom: 14px; }
+  #overall .msg { font-size: 1rem; margin: 10px 0 18px; }
+  .small .place { max-width: 150px; padding: 10px 6px; animation: none; }
+  .small .place .medal { font-size: 1.8rem; }
+  .small .place .who { font-size: 1.05rem; margin: 4px 0; }
+  .small .place .pts { font-size: .9rem; }
+  .small .p1 { height: 150px; } .small .p2 { height: 120px; } .small .p3 { height: 95px; }
+  #resetAllBtn { background: transparent; color: #fff; border: 2px solid rgba(255,255,255,.5); }
 </style>
 </head>
 <body>
@@ -82,6 +96,13 @@
     <div id="voteCount">0 votes so far</div>
     <button class="hostBtn" id="endBtn">End voting & show top 3</button>
     <button class="hostBtn" id="newBtn">Start a new vote</button>
+    <br><button class="hostBtn" id="resetAllBtn">Reset overall leaderboard</button>
+  </div>
+
+  <div id="overall">
+    <h3>🏅 Overall leaderboard</h3>
+    <div class="note" id="roundsNote">Points from all finished votes</div>
+    <div class="podium small" id="overallPodium"></div>
   </div>
 
 <script>
@@ -93,7 +114,7 @@
 
   const seen = new Set();
   const events = [];   // {time, id, data}
-  let state = { round: "initial", votes: {}, closed: false, total: 0 };
+  let state = { round: "initial", votes: {}, closed: false, total: 0, overall: {}, rounds: 0 };
 
   const namesEl = document.getElementById("names");
   const msgEl = document.getElementById("msg");
@@ -109,17 +130,21 @@
   function myVoteKey() { return `cj-voted-${TOPIC}-${state.round}`; }
 
   function recompute() {
-    events.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
-    let round = "initial", votes = {}, closed = false, total = 0;
+    events.sort((a, b) => a.time - b.time || (a.data.ts || 0) - (b.data.ts || 0) || a.seq - b.seq);
+    let round = "initial", votes = {}, closed = false, total = 0, overall = {}, rounds = 0;
     for (const e of events) {
       const d = e.data;
-      if (d.type === "reset") { round = d.round; votes = {}; closed = false; total = 0; }
+      if (d.type === "resetAll") { round = d.round; votes = {}; closed = false; total = 0; overall = {}; rounds = 0; }
+      else if (d.type === "reset") { round = d.round; votes = {}; closed = false; total = 0; }
       else if (d.type === "vote" && d.round === round && !closed && names.includes(d.name)) {
         votes[d.name] = (votes[d.name] || 0) + 1; total++;
       }
-      else if (d.type === "close" && d.round === round) closed = true;
+      else if (d.type === "close" && d.round === round && !closed) {
+        closed = true; rounds++;
+        for (const [n, p] of Object.entries(votes)) overall[n] = (overall[n] || 0) + p;
+      }
     }
-    state = { round, votes, closed, total };
+    state = { round, votes, closed, total, overall, rounds };
     render();
   }
 
@@ -128,6 +153,7 @@
     document.getElementById("voteCount").textContent =
       `${state.total} vote${state.total === 1 ? "" : "s"} so far`;
     document.getElementById("endBtn").disabled = state.closed;
+    renderOverall();
 
     if (state.closed) {
       namesEl.classList.add("hidden");
@@ -148,36 +174,46 @@
 
   function showMsg(t) { msgEl.textContent = t; msgEl.classList.toggle("hidden", !t); }
 
+  function fillPodium(podium, votes, emptyText) {
+    // Group by points so ties share a podium spot
+    const groups = {};
+    Object.entries(votes).forEach(([n, p]) => (groups[p] = groups[p] || []).push(n));
+    const ranked = Object.keys(groups).map(Number).sort((a, b) => b - a).slice(0, 3)
+      .map(p => ({ pts: p, who: groups[p].join(" & ") }));
+    podium.innerHTML = "";
+    if (!ranked.length) {
+      podium.innerHTML = `<div class="msg">${emptyText}</div>`;
+      return;
+    }
+    const medals = ["🥇","🥈","🥉"];
+    [1, 0, 2].forEach(i => {
+      if (!ranked[i]) return;
+      const d = document.createElement("div");
+      d.className = `place p${i + 1}`;
+      d.innerHTML = `<div class="medal">${medals[i]}</div>
+        <div class="who"></div>
+        <div class="pts">${ranked[i].pts} point${ranked[i].pts === 1 ? "" : "s"}</div>`;
+      d.querySelector(".who").textContent = ranked[i].who;
+      podium.appendChild(d);
+    });
+  }
+
+  function renderOverall() {
+    fillPodium(document.getElementById("overallPodium"), state.overall,
+      "No points yet – they appear here after each finished vote.");
+    document.getElementById("roundsNote").textContent =
+      `Points from ${state.rounds} finished vote${state.rounds === 1 ? "" : "s"}`;
+  }
+
   function showResults() {
     const res = document.getElementById("results");
     if (!res.classList.contains("hidden")) return;
-    // Group by points so ties share a podium spot
-    const groups = {};
-    Object.entries(state.votes).forEach(([n, p]) => (groups[p] = groups[p] || []).push(n));
-    const ranked = Object.keys(groups).map(Number).sort((a, b) => b - a).slice(0, 3)
-      .map(p => ({ pts: p, who: groups[p].join(" & ") }));
-    const podium = document.getElementById("podium");
-    podium.innerHTML = "";
-    if (!ranked.length) {
-      podium.innerHTML = `<div class="msg">No votes were cast 🤷</div>`;
-    } else {
-      const medals = ["🥇","🥈","🥉"];
-      [1, 0, 2].forEach(i => {
-        if (!ranked[i]) return;
-        const d = document.createElement("div");
-        d.className = `place p${i + 1}`;
-        d.innerHTML = `<div class="medal">${medals[i]}</div>
-          <div class="who"></div>
-          <div class="pts">${ranked[i].pts} point${ranked[i].pts === 1 ? "" : "s"}</div>`;
-        d.querySelector(".who").textContent = ranked[i].who;
-        podium.appendChild(d);
-      });
-    }
+    fillPodium(document.getElementById("podium"), state.votes, "No votes were cast 🤷");
     res.classList.remove("hidden");
   }
 
   async function publish(data) {
-    const r = await fetch(BASE, { method: "POST", body: JSON.stringify(data) });
+    const r = await fetch(BASE, { method: "POST", body: JSON.stringify({ ...data, ts: Date.now() }) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     ingest(j);
@@ -199,7 +235,7 @@
   function ingest(ev) {
     if (!ev || ev.event !== "message" || seen.has(ev.id)) return;
     seen.add(ev.id);
-    try { events.push({ time: ev.time, id: ev.id, data: JSON.parse(ev.message) }); }
+    try { events.push({ time: ev.time, id: ev.id, seq: events.length, data: JSON.parse(ev.message) }); }
     catch { return; }
     recompute();
   }
@@ -218,6 +254,10 @@
     document.getElementById("newBtn").onclick = async () => {
       if (!confirm("Start a brand-new vote? All current votes will be cleared.")) return;
       await publish({ type: "reset", round: String(Date.now()) });
+    };
+    document.getElementById("resetAllBtn").onclick = async () => {
+      if (!confirm("Reset the overall leaderboard AND start a new vote? This clears all points.")) return;
+      await publish({ type: "resetAll", round: String(Date.now()) });
     };
   }
 
