@@ -109,8 +109,8 @@
     <div id="winner">Click the wheel to spin!</div>
   </div>
   <h1>🎨 Colour Jeopardy</h1>
-  <p class="sub">Pick a card – you have 45 seconds!</p>
-  <div id="timer">0:45</div>
+  <p class="sub">Pick a card – you have 30 seconds!</p>
+  <div id="timer">0:30</div>
   <div class="grid" id="grid"></div>
   <button id="reset">Reset all cards</button>
 
@@ -126,7 +126,7 @@
 
   const grid = document.getElementById("grid");
   const timerEl = document.getElementById("timer");
-  const DURATION = 45;
+  const DURATION = 30;
   let remaining = DURATION, intervalId = null, audioCtx = null;
   let musicGain = null, musicTimeout = null;
 
