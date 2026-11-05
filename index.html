@@ -189,9 +189,28 @@
     }
   }
 
+  const usedCardsKey = "colour-jeopardy-used-cards";
+  let usedCards = new Set();
+  try {
+    const saved = JSON.parse(localStorage.getItem(usedCardsKey) || "[]");
+    if (Array.isArray(saved)) {
+      usedCards = new Set(saved.filter(name => cards.some(c => c.name === name)));
+    }
+  } catch (error) {
+    console.error("Could not restore used cards.", error);
+  }
+
+  function saveUsedCards() {
+    try {
+      localStorage.setItem(usedCardsKey, JSON.stringify([...usedCards]));
+    } catch (error) {
+      console.error("Could not save used cards across refreshes.", error);
+    }
+  }
+
   cards.forEach(c => {
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = usedCards.has(c.name) ? "card flipped" : "card";
     card.innerHTML = `
       <div class="inner">
         <div class="face front" style="background:${c.color}">${c.name}</div>
@@ -200,6 +219,8 @@
     card.addEventListener("click", () => {
       if (card.classList.contains("flipped")) return;
       card.classList.add("flipped");
+      usedCards.add(c.name);
+      saveUsedCards();
       startTimer();
     });
     grid.appendChild(card);
@@ -305,6 +326,8 @@
   });
 
   document.getElementById("reset").addEventListener("click", () => {
+    usedCards.clear();
+    saveUsedCards();
     document.querySelectorAll(".card").forEach(c => c.classList.remove("flipped"));
     clearInterval(intervalId);
     if (audioCtx) stopMusic();
